@@ -1,11 +1,11 @@
 package org.influxdb.impl;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
-import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
-import com.google.common.base.Stopwatch;
-import com.google.common.base.Throwables;
-import com.google.common.collect.Lists;
 import org.influxdb.InfluxDB;
 import org.influxdb.dto.BatchPoints;
 import org.influxdb.dto.Point;
@@ -13,6 +13,13 @@ import org.influxdb.dto.Pong;
 import org.influxdb.dto.Query;
 import org.influxdb.dto.QueryResult;
 import org.influxdb.impl.BatchProcessor.BatchEntry;
+
+import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Stopwatch;
+import com.google.common.base.Throwables;
+import com.google.common.collect.Lists;
+
 import okhttp3.Headers;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -23,13 +30,7 @@ import okhttp3.logging.HttpLoggingInterceptor.Level;
 import retrofit2.Call;
 import retrofit2.Response;
 import retrofit2.Retrofit;
-import retrofit2.converter.moshi.MoshiConverterFactory;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
+import retrofit2.converter.jackson.JacksonConverterFactory;
 
 /**
  * Implementation of a InluxDB API.
@@ -51,18 +52,13 @@ public class InfluxDBImpl implements InfluxDB {
 	private final HttpLoggingInterceptor loggingInterceptor;
 	private LogLevel logLevel = LogLevel.NONE;
 
-	public InfluxDBImpl(final String url, final String username, final String password,
-			final OkHttpClient.Builder client) {
+	public InfluxDBImpl(final String url, final String username, final String password, final OkHttpClient.Builder client) {
 		super();
 		this.username = username;
 		this.password = password;
 		this.loggingInterceptor = new HttpLoggingInterceptor();
 		this.loggingInterceptor.setLevel(Level.NONE);
-		this.retrofit = new Retrofit.Builder()
-				.baseUrl(url)
-				.client(client.addInterceptor(loggingInterceptor).build())
-				.addConverterFactory(MoshiConverterFactory.create())
-				.build();
+		this.retrofit = new Retrofit.Builder().baseUrl(url).client(client.addInterceptor(loggingInterceptor).build()).addConverterFactory(JacksonConverterFactory.create()).build();
 		this.influxDBService = this.retrofit.create(InfluxDBService.class);
 	}
 
@@ -89,15 +85,11 @@ public class InfluxDBImpl implements InfluxDB {
 	}
 
 	@Override
-	public InfluxDB enableBatch(final int actions, final int flushDuration, final TimeUnit flushDurationTimeUnit)	{
+	public InfluxDB enableBatch(final int actions, final int flushDuration, final TimeUnit flushDurationTimeUnit) {
 		if (this.batchEnabled.get()) {
 			throw new IllegalArgumentException("BatchProcessing is already enabled.");
 		}
-		this.batchProcessor = BatchProcessor
-				.builder(this)
-				.actions(actions)
-				.interval(flushDuration, flushDurationTimeUnit)
-				.build();
+		this.batchProcessor = BatchProcessor.builder(this).actions(actions).interval(flushDuration, flushDurationTimeUnit).build();
 		this.batchEnabled.set(true);
 		return this;
 	}
@@ -107,14 +99,12 @@ public class InfluxDBImpl implements InfluxDB {
 		this.batchEnabled.set(false);
 		this.batchProcessor.flush();
 		if (this.logLevel != LogLevel.NONE) {
-			System.out.println(
-					"total writes:" + this.writeCount.get() + " unbatched:" + this.unBatchedCount.get() + "batchPoints:"
-							+ this.batchedCount);
+			System.out.println("total writes:" + this.writeCount.get() + " unbatched:" + this.unBatchedCount.get() + "batchPoints:" + this.batchedCount);
 		}
 	}
 
 	@Override
-	public boolean isBatchEnabled()	{
+	public boolean isBatchEnabled() {
 		return this.batchEnabled.get();
 	}
 
@@ -135,14 +125,13 @@ public class InfluxDBImpl implements InfluxDB {
 			pong.setVersion(version);
 			pong.setResponseTime(watch.elapsed(TimeUnit.MILLISECONDS));
 			return pong;
-		}
-		catch (IOException e) {
+		} catch (IOException e) {
 			throw Throwables.propagate(e);
 		}
 	}
 
 	@Override
-	public String version()	{
+	public String version() {
 		return ping().getVersion();
 	}
 
@@ -164,32 +153,18 @@ public class InfluxDBImpl implements InfluxDB {
 	public void write(final BatchPoints batchPoints) {
 		this.batchedCount.addAndGet(batchPoints.getPoints().size());
 		RequestBody lineProtocol = RequestBody.create(MEDIA_TYPE_STRING, batchPoints.lineProtocol());
-		execute(this.influxDBService.writePoints(
-				this.username,
-				this.password,
-				batchPoints.getDatabase(),
-				batchPoints.getRetentionPolicy(),
-				TimeUtil.toTimePrecision(TimeUnit.NANOSECONDS),
-				batchPoints.getConsistency().value(),
-				lineProtocol));
+		execute(this.influxDBService.writePoints(this.username, this.password, batchPoints.getDatabase(), batchPoints.getRetentionPolicy(), TimeUtil.toTimePrecision(TimeUnit.NANOSECONDS),
+				batchPoints.getConsistency().value(), lineProtocol));
 	}
 
 	@Override
-	public void write(final String database, final String retentionPolicy, final ConsistencyLevel consistency,
-			final String records)	{
-		execute(this.influxDBService.writePoints(
-				this.username,
-				this.password,
-				database,
-				retentionPolicy,
-				TimeUtil.toTimePrecision(TimeUnit.NANOSECONDS),
-				consistency.value(),
+	public void write(final String database, final String retentionPolicy, final ConsistencyLevel consistency, final String records) {
+		execute(this.influxDBService.writePoints(this.username, this.password, database, retentionPolicy, TimeUtil.toTimePrecision(TimeUnit.NANOSECONDS), consistency.value(),
 				RequestBody.create(MEDIA_TYPE_STRING, records)));
 	}
 
 	@Override
-	public void write(final String database, final String retentionPolicy, final ConsistencyLevel consistency,
-			final List<String> records)	{
+	public void write(final String database, final String retentionPolicy, final ConsistencyLevel consistency, final List<String> records) {
 		final String joinedRecords = Joiner.on("\n").join(records);
 		write(database, retentionPolicy, consistency, joinedRecords);
 	}
@@ -198,7 +173,7 @@ public class InfluxDBImpl implements InfluxDB {
 	 * {@inheritDoc}
 	 */
 	@Override
-	public QueryResult query(final Query query)	{
+	public QueryResult query(final Query query) {
 		Call<QueryResult> call;
 		if (query.requiresPost()) {
 			call = this.influxDBService.postQuery(this.username, this.password, query.getDatabase(), query.getCommand());
@@ -213,8 +188,7 @@ public class InfluxDBImpl implements InfluxDB {
 	 */
 	@Override
 	public QueryResult query(final Query query, final TimeUnit timeUnit) {
-		return execute(this.influxDBService.query(this.username, this.password, query.getDatabase(),
-				TimeUtil.toTimePrecision(timeUnit), query.getCommand()));
+		return execute(this.influxDBService.query(this.username, this.password, query.getDatabase(), TimeUtil.toTimePrecision(timeUnit), query.getCommand()));
 	}
 
 	/**
@@ -234,7 +208,7 @@ public class InfluxDBImpl implements InfluxDB {
 	 * {@inheritDoc}
 	 */
 	@Override
-	public void deleteDatabase(final String name)	{
+	public void deleteDatabase(final String name) {
 		execute(this.influxDBService.postQuery(this.username, this.password, "DROP DATABASE \"" + name + "\""));
 	}
 
@@ -242,7 +216,7 @@ public class InfluxDBImpl implements InfluxDB {
 	 * {@inheritDoc}
 	 */
 	@Override
-	public List<String> describeDatabases()	{
+	public List<String> describeDatabases() {
 		QueryResult result = execute(this.influxDBService.query(this.username, this.password, "SHOW DATABASES"));
 		// {"results":[{"series":[{"name":"databases","columns":["name"],"values":[["mydb"]]}]}]}
 		// Series [name=databases, columns=[name], values=[[mydb], [unittest_1433605300968]]]
@@ -256,17 +230,16 @@ public class InfluxDBImpl implements InfluxDB {
 		return databases;
 	}
 
-	private <T> T execute(Call<T> call)	{
+	private <T> T execute(Call<T> call) {
 		try {
 			Response<T> response = call.execute();
 			if (response.isSuccessful()) {
 				return response.body();
 			}
-			try (ResponseBody errorBody = response.errorBody()){
+			try (ResponseBody errorBody = response.errorBody()) {
 				throw new RuntimeException(errorBody.string());
 			}
-		}
-		catch (IOException e) {
+		} catch (IOException e) {
 			throw Throwables.propagate(e);
 		}
 	}
